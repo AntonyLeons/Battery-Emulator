@@ -155,9 +155,9 @@ void update_values_battery() {
 
   // Safety checks
   if (!isolation_status) {
-    set_event(EVENT_INSULATION_FAILURE, 0);
+    set_event(EVENT_BATTERY_ISOLATION, 0);
   } else {
-    clear_event(EVENT_INSULATION_FAILURE);
+    clear_event(EVENT_BATTERY_ISOLATION);
   }
 
   // Allow contactor closing if the battery is detected on CAN
@@ -170,20 +170,25 @@ void update_values_battery() {
 void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
   datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
   
+  // Declare variables outside the switch statement to avoid jump errors
+  uint8_t socValue = 0;
+  uint8_t powerIndicator = 0;
+  uint8_t remainingData = 0;
+  
   switch (rx_frame.ID) {
     case 0x0AF:  // Battery state data frame
       // Based on log analysis: bytes 2, 5, 6, 7 contain important data
       
       // Byte 5 appears to be SOC value
       // From the logs, we can see it goes from 0x81 (129 decimal) which is 81% SOC
-      uint8_t socValue = rx_frame.data.u8[5];
+      socValue = rx_frame.data.u8[5];
       if (socValue <= 100) {
         SOC_BMS = socValue * 100; // Convert to 0.01% format (e.g., 81 -> 8100)
       }
       
       // Bytes 2 and 6 appear to be related to remaining capacity or power
-      uint8_t powerIndicator = rx_frame.data.u8[2];
-      uint8_t remainingData = rx_frame.data.u8[6];
+      powerIndicator = rx_frame.data.u8[2];
+      remainingData = rx_frame.data.u8[6];
       
       // Decode power values - values from log show correlation between byte 2 and available power
       // Higher values in byte 2 appear when SOC is higher
@@ -570,7 +575,7 @@ void setup_battery(void) {  // Performs one time setup at startup
   datalayer.battery.status.temperature_min_dC = temperatureMin;
   datalayer.battery.status.temperature_max_dC = temperatureMax;
   datalayer.battery.status.real_bms_status = BMS_STANDBY;
-  datalayer.battery.status.bms_status = BMS_STANDBY;
+  datalayer.battery.status.bms_status = STANDBY; // Use the bms_status_enum type
   datalayer.system.status.battery_allows_contactor_closing = isolation_status;
   
 #ifdef DEBUG_LOG
