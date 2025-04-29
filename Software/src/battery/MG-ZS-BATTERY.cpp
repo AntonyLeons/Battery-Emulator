@@ -219,7 +219,7 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
       // Vehicle is requesting BMS status information
       // Set appropriate response in the next transmission cycle
 #ifdef DEBUG_LOG
-      logging.println("MG5: BMS status request received");
+      logging.println("MGZS: BMS status request received");
 #endif
       break;
       
@@ -233,21 +233,21 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
           contactorStatus = true;
           datalayer.battery.status.real_bms_status = BMS_ACTIVE;
 #ifdef DEBUG_LOG
-          logging.println("MG5: Contactor close command accepted");
+          logging.println("MGZS: Contactor close command accepted");
 #endif
         } else {
           contactorStatus = false;
           datalayer.battery.status.real_bms_status = BMS_STANDBY;
 #ifdef DEBUG_LOG
-          logging.println("MG5: Contactor open command executed or close rejected");
+          logging.println("MGZS: Contactor open command executed or close rejected");
           if (!isolation_status) {
-            logging.println("MG5: Contactor close rejected due to isolation fault");
+            logging.println("MGZS: Contactor close rejected due to isolation fault");
           }
           if (SOC_BMS <= 100) {
-            logging.println("MG5: Contactor close rejected due to low SOC");
+            logging.println("MGZS: Contactor close rejected due to low SOC");
           }
           if (SOC_BMS >= 9900) {
-            logging.println("MG5: Contactor close rejected due to high SOC");
+            logging.println("MGZS: Contactor close rejected due to high SOC");
           }
 #endif
         }
@@ -287,7 +287,7 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
         allowedChargePower = 40000;     // 40kW max charge
         allowedDischargePower = 1000;   // Limit discharge during charging
 #ifdef DEBUG_LOG
-        logging.println("MG5: Charging mode activated");
+        logging.println("MGZS: Charging mode activated");
 #endif
       } else {
         // Normal driving mode
@@ -307,12 +307,12 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
       if (rx_frame.data.u8[0] & 0x01) {  // Cooling request
         // Acknowledge cooling request
 #ifdef DEBUG_LOG
-        logging.println("MG5: Battery cooling requested");
+        logging.println("MGZS: Battery cooling requested");
 #endif
       } else if (rx_frame.data.u8[0] & 0x02) { // Heating request
         // Acknowledge heating request
 #ifdef DEBUG_LOG
-        logging.println("MG5: Battery heating requested");
+        logging.println("MGZS: Battery heating requested");
 #endif
       }
       break;
@@ -320,7 +320,7 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
     case 0x620:  // Wake-up message
       // Vehicle may send this to wake up the battery
 #ifdef DEBUG_LOG
-      logging.println("MG5: Battery wake-up message received");
+      logging.println("MGZS: Battery wake-up message received");
 #endif
       break;
       
@@ -548,7 +548,7 @@ void transmit_can_battery() {
 }
 
 void setup_battery(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, "MG 5 battery", 63);
+  strncpy(datalayer.system.info.battery_protocol, "MG ZS battery", 63);
   datalayer.system.info.battery_protocol[63] = '\0';
 
   // Set battery specs
@@ -579,7 +579,7 @@ void setup_battery(void) {  // Performs one time setup at startup
   datalayer.system.status.battery_allows_contactor_closing = isolation_status;
   
 #ifdef DEBUG_LOG
-  logging.println("MG-5-BATTERY: Initialized battery emulator");
+  logging.println("MG-ZS-BATTERY: Initialized battery emulator");
   logging.print("Battery capacity: ");
   logging.print(datalayer.battery.info.total_capacity_Wh / 1000.0, 1);
   logging.println(" kWh");
