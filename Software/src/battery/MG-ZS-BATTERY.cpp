@@ -1,6 +1,7 @@
 #include "../include.h"
-#ifdef MG_ZS_BATTERY_H
+#ifdef MG_ZS_BATTERY
 #include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
 #include "../devboard/utils/events.h"
 #include "MG-ZS-BATTERY.h"
 
@@ -44,6 +45,13 @@ CAN_frame MG_ZS_0FB = {.FD = false,
                       .DLC = 8,
                       .ID = 0x0FB,
                       .data = {0x0D, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x05, 0xFF}};
+
+// UDS diagnostic response frame
+CAN_frame MG_ZS_UDS_RESPONSE = {.FD = false,
+                              .ext_ID = false,
+                              .DLC = 8, 
+                              .ID = 0x789,
+                              .data = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
 
 // Battery status frame
 CAN_frame MG_ZS_19C = {.FD = false,
