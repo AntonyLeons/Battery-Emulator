@@ -109,69 +109,435 @@ CAN_frame MG_ZS_0AF = {.FD = false,
                       .ID = 0x0AF,
                       .data = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
 
-void update_values_battery() {
-  if (datalayer.system.settings.equipment_stop_active == true) {
-    // If emergency stop is active, don't wake up the battery
-    return;
-  }
-
-  // Map all values from MG ZS EV battery to the datalayer structure
-  datalayer.battery.status.real_soc = SOC_BMS;  // Use internal BMS SOC
-  datalayer.battery.status.voltage_dV = batteryVoltage;  // Total pack voltage in decivolts
-  datalayer.battery.status.current_dA = batteryCurrent * 10;  // Convert from amps to deciamps
-
-  // Map power limits
-  datalayer.battery.status.max_discharge_power_W = allowedDischargePower;
-  datalayer.battery.status.max_charge_power_W = allowedChargePower;
-
-  // Map temperature readings
-  datalayer.battery.status.temperature_min_dC = temperatureMin * 10; // Convert to decicelsius
-  datalayer.battery.status.temperature_max_dC = temperatureMax * 10; // Convert to decicelsius
-
-  // Calculate cell statistics for BMS safety checks
-  if (num_cells > 0) {
-    uint16_t min_cell_v = 9999;
-    uint16_t max_cell_v = 0;
-    for (uint8_t i = 0; i < num_cells; i++) {
-      if (cellVoltages[i] < min_cell_v && cellVoltages[i] > 0) {
-        min_cell_v = cellVoltages[i];
+// Handle UDS diagnostic requests according to MG ZS EV protocol
+void handle_uds_request(CAN_frame rx_frame) {
+  // Check service type in the second byte (B1)
+  if (rx_frame.data.u8[1] == 0x22) { // Read Data By Identifier
+    // The parameter ID is in bytes B2 and B3
+    uint8_t pid_high = rx_frame.data.u8[2];
+    uint8_t pid_low = rx_frame.data.u8[3];
+    
+    // Clear the response frame first
+    memset(MG_ZS_UDS_RESPONSE.data.u8, 0, 8);
+    
+    // Set standard positive response header
+    MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;  // Default length (may be updated)
+    MG_ZS_UDS_RESPONSE.data.u8[1] = 0x62;  // 0x62 is positive response to 0x22
+    MG_ZS_UDS_RESPONSE.data.u8[2] = pid_high;
+    MG_ZS_UDS_RESPONSE.data.u8[3] = pid_low;
+    
+    // Handle the specific PID
+    if (pid_high == 0xB0) {
+      switch (pid_low) {
+        case 0x41:  // Battery Bus Voltage
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x06;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x8F;
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x42:  // Battery Voltage
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Convert batteryVoltage (in decivolts) to the format expected by UDS
+          uint16_t voltage = batteryVoltage;  // in decivolts (385.0V = 3850)
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (voltage >> 8) & 0xFF;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = voltage & 0xFF;        // Low byte
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x43:  // Battery Current
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Convert batteryCurrent (in deciamps) to the format expected by UDS
+          // Example in the table shows 9C 53 which would be a specific current value
+          // We'll use the current value from our model
+          int16_t current = batteryCurrent * 10;  // Convert to deciamps (for consistency)
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (current >> 8) & 0xFF;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = current & 0xFF;        // Low byte
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x45:  // Battery Resistance
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Use a fixed resistance value (3F FD from the example)
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x3F;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0xFD;
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x46:  // Battery SoC
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Convert SOC_BMS (0.01%) to the format expected by UDS
+          // Example in table shows 02 85 which is probably a percentage value
+          uint16_t soc = SOC_BMS / 25;  // Convert from 0.01% to the UDS format
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (soc >> 8) & 0xFF;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = soc & 0xFF;        // Low byte
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x47:  // BMS Error
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // No errors in our emulator
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          break;
+          
+        case 0x48:  // BMS Status
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+          // Status code 03 from the example
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x03;
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x49:  // System Main Relay B
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Always 1 according to the note
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x01;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          break;
+          
+        case 0x4A:  // System Main Relay G
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Always 1 according to the note
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x01;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          break;
+          
+        case 0x52:  // System Main Relay P
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Always 1 according to the note
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x01;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          break;
+          
+        case 0x56:  // Battery Temp
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+          // Use our temperature value, converted to the format expected by UDS
+          MG_ZS_UDS_RESPONSE.data.u8[4] = temperatureMax & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          break;
+          
+        case 0x58:  // Max Cell Voltage
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x06;
+          // Use our max cell voltage
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (CellVoltMax_mV >> 8) & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = CellVoltMax_mV & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xFF;  // Separator or indicator
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;  // Unused
+          break;
+          
+        case 0x59:  // Min Cell Voltage
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x06;
+          // Use our min cell voltage
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (CellVoltMin_mV >> 8) & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = CellVoltMin_mV & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xFF;  // Separator or indicator
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;  // Unused
+          break;
+          
+        case 0x5C:  // Battery Coolant Temp
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+          // Use a default coolant temperature (0x6D from example)
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x6D;  // About 25°C in their format
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x61:  // Battery SoH
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          // Provide battery SOH - example shows 27 10 = ~98%
+          MG_ZS_UDS_RESPONSE.data.u8[4] = (batterySOH >> 8) & 0xFF;
+          MG_ZS_UDS_RESPONSE.data.u8[5] = batterySOH & 0xFF;
+          // Fill remaining bytes with 0xAA (unused)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x6D:  // BMS Time
+          // This is a multi-frame response, but we'll simulate with what fits
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x10;  // First frame of multi-frame response
+          MG_ZS_UDS_RESPONSE.data.u8[1] = 0x09;  // Additional length
+          MG_ZS_UDS_RESPONSE.data.u8[2] = 0x62;  // Service response
+          MG_ZS_UDS_RESPONSE.data.u8[3] = 0xB0;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x6D;
+          
+          // Use current date/time for the response
+          // Format: YY MM DD HH MM SS
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x15;  // Year (e.g., 2021 = 0x15)
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0x04;  // Month (e.g., April = 0x04)
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0x12;  // Day (e.g., 18th = 0x12)
+          break;
+          
+        default:
+          // Unknown PID - send negative response
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x03;
+          MG_ZS_UDS_RESPONSE.data.u8[1] = 0x7F;  // Negative response
+          MG_ZS_UDS_RESPONSE.data.u8[2] = 0x22;  // Service ID
+          MG_ZS_UDS_RESPONSE.data.u8[3] = 0x11;  // Error code: service not supported
+          break;
       }
-      if (cellVoltages[i] > max_cell_v) {
-        max_cell_v = cellVoltages[i];
+    } 
+    // Handle DCDC requests
+    else if (rx_frame.ID == 0x785 && pid_high == 0xB0) {
+      // We're going to emulate DCDC responses
+      switch (pid_low) {
+        case 0x22:  // DCDC LV Current
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x0C;  // Low byte
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x21:  // DCDC LV Voltage
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x76;  // Low byte
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x25:  // DCDC Power Load
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x1B;  // Low byte
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
+          
+        case 0x26:  // DCDC Temperature
+          MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+          MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;  // High byte
+          MG_ZS_UDS_RESPONSE.data.u8[5] = 0x4A;  // Low byte
+          MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
+          MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
+          break;
       }
     }
-    
-    datalayer.battery.status.cell_min_voltage_mV = min_cell_v;
-    datalayer.battery.status.cell_max_voltage_mV = max_cell_v;
-    
-    // Check if voltage spread is within safe limits
-    uint16_t voltage_spread = max_cell_v - min_cell_v;
-    if (voltage_spread > MAX_CELL_DEVIATION_MV) {
-      set_event(EVENT_CELL_DEVIATION_HIGH, voltage_spread);
-    } else {
-      clear_event(EVENT_CELL_DEVIATION_HIGH);
+    // Handle VCU requests
+    else if (rx_frame.ID == 0x7E3) {
+      // We're simulating VCU responses here
+      switch (pid_high) {
+        case 0xBA:
+          if (pid_low == 0x00) {  // Vehicle Speed
+            MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+            MG_ZS_UDS_RESPONSE.data.u8[4] = 0x59;  // High byte
+            MG_ZS_UDS_RESPONSE.data.u8[5] = 0x23;  // Low byte
+            MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;  // Additional bytes
+            MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          }
+          break;
+          
+        case 0xB7:
+          switch (pid_low) {
+            case 0x1B:  // Charger Connected
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x00;  // 0 = not connected
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x12:  // Max Charge Rate
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x01;  // High byte
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0x9C;  // Low byte
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x02:  // BMS Running State
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x03;  // From example
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x03:  // HV Contactors
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = contactorStatus ? 0x01 : 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x05:  // Battery Voltage (via VCU)
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+              // Different format than the BMS reports
+              uint16_t vcuVoltage = batteryVoltage / 10;  // Adjust to match example format
+              MG_ZS_UDS_RESPONSE.data.u8[4] = (vcuVoltage >> 8) & 0xFF;
+              MG_ZS_UDS_RESPONSE.data.u8[5] = vcuVoltage & 0xFF;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+          }
+          break;
+          
+        case 0xB3:
+          if (pid_low == 0x09) {  // Motor Coolant
+            MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+            MG_ZS_UDS_RESPONSE.data.u8[4] = 0x4A;  // ~35°C in their format
+            MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          }
+          break;
+          
+        case 0xB4:
+          switch (pid_low) {
+            case 0x05:  // Motor Temp
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x4A;  // Same as coolant
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x01:  // Motor Torque
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x7F;  // From example
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0xFF;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+              
+            case 0x02:  // Motor Speed
+              MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+              MG_ZS_UDS_RESPONSE.data.u8[4] = 0x7F;  // From example
+              MG_ZS_UDS_RESPONSE.data.u8[5] = 0xFF;
+              MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+              MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+              break;
+          }
+          break;
+          
+        case 0x01:
+          if (pid_low == 0x12) {  // 12V Supply Voltage
+            MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
+            MG_ZS_UDS_RESPONSE.data.u8[4] = 0x8E;  // From example
+            MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          }
+          break;
+          
+        case 0xB1:
+          if (pid_low == 0x8C) {  // Ignition State
+            MG_ZS_UDS_RESPONSE.data.u8[0] = 0x04;
+            MG_ZS_UDS_RESPONSE.data.u8[4] = 0x02;  // From example
+            MG_ZS_UDS_RESPONSE.data.u8[5] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
+            MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
+          }
+          break;
+      }
     }
+    // Update the ID to match the expected response address
+    if (rx_frame.ID == 0x781) {
+      MG_ZS_UDS_RESPONSE.ID = 0x789;  // BMS response ID
+    } else if (rx_frame.ID == 0x785) {
+      MG_ZS_UDS_RESPONSE.ID = 0x78D;  // DCDC response ID
+    } else if (rx_frame.ID == 0x7E3) {
+      MG_ZS_UDS_RESPONSE.ID = 0x7EB;  // VCU response ID
+    }
+    
+    // Send the response
+    transmit_can_frame(&MG_ZS_UDS_RESPONSE, can_config.battery);
+    
+#ifdef DEBUG_LOG
+    logging.print("MG-ZS UDS request: 0x");
+    logging.print(rx_frame.ID, HEX);
+    logging.print(" PID ");
+    logging.print(pid_high, HEX);
+    logging.print(" ");
+    logging.println(pid_low, HEX);
+#endif
   }
-
-  // Battery design parameters
-  datalayer.battery.info.number_of_cells = num_cells;
-  datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
-  datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_DV;
-  datalayer.battery.info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
-  datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
-  datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
-
-  // Safety checks
-  if (!isolation_status) {
-    set_event(EVENT_BATTERY_ISOLATION, 0);
-  } else {
-    clear_event(EVENT_BATTERY_ISOLATION);
+  else if (rx_frame.data.u8[1] == 0x2E) {
+    // Write data by identifier - we could implement this later
+    // For now, just send a positive response mirroring the request
+    MG_ZS_UDS_RESPONSE.data.u8[0] = 0x03;
+    MG_ZS_UDS_RESPONSE.data.u8[1] = 0x6E;  // Positive response to 0x2E
+    MG_ZS_UDS_RESPONSE.data.u8[2] = rx_frame.data.u8[2];
+    MG_ZS_UDS_RESPONSE.data.u8[3] = rx_frame.data.u8[3];
+    // Rest of the bytes stay 0
+    
+    // Update the ID to match the expected response address
+    if (rx_frame.ID == 0x781) {
+      MG_ZS_UDS_RESPONSE.ID = 0x789;
+    } else if (rx_frame.ID == 0x785) {
+      MG_ZS_UDS_RESPONSE.ID = 0x78D;
+    } else if (rx_frame.ID == 0x7E3) {
+      MG_ZS_UDS_RESPONSE.ID = 0x7EB;
+    }
+    
+    // Send the response
+    transmit_can_frame(&MG_ZS_UDS_RESPONSE, can_config.battery);
   }
-
-  // Allow contactor closing if the battery is detected on CAN
-  if (SOC_BMS > 0) {
-    datalayer.system.status.battery_allows_contactor_closing = true;
-    datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+  else if (rx_frame.data.u8[1] == 0x10) {
+    // Diagnostic session control - respond with positive acknowledgment
+    MG_ZS_UDS_RESPONSE.data.u8[0] = 0x03;
+    MG_ZS_UDS_RESPONSE.data.u8[1] = 0x50;  // Positive response to 0x10
+    MG_ZS_UDS_RESPONSE.data.u8[2] = rx_frame.data.u8[2]; // Session type
+    MG_ZS_UDS_RESPONSE.data.u8[3] = 0x00;
+    // Rest of the bytes stay 0
+    
+    // Update the ID to match the expected response address
+    if (rx_frame.ID == 0x781) {
+      MG_ZS_UDS_RESPONSE.ID = 0x789;
+    } else if (rx_frame.ID == 0x785) {
+      MG_ZS_UDS_RESPONSE.ID = 0x78D;
+    } else if (rx_frame.ID == 0x7E3) {
+      MG_ZS_UDS_RESPONSE.ID = 0x7EB;
+    }
+    
+    // Send the response
+    transmit_can_frame(&MG_ZS_UDS_RESPONSE, can_config.battery);
+  }
+  else {
+    // Unsupported UDS service - send negative response
+    MG_ZS_UDS_RESPONSE.data.u8[0] = 0x03;
+    MG_ZS_UDS_RESPONSE.data.u8[1] = 0x7F;  // Negative response
+    MG_ZS_UDS_RESPONSE.data.u8[2] = rx_frame.data.u8[1];  // Service ID that was requested
+    MG_ZS_UDS_RESPONSE.data.u8[3] = 0x11;  // Error code: service not supported
+    // Rest of the bytes stay 0
+    
+    // Update the ID to match the expected response address
+    if (rx_frame.ID == 0x781) {
+      MG_ZS_UDS_RESPONSE.ID = 0x789;
+    } else if (rx_frame.ID == 0x785) {
+      MG_ZS_UDS_RESPONSE.ID = 0x78D;
+    } else if (rx_frame.ID == 0x7E3) {
+      MG_ZS_UDS_RESPONSE.ID = 0x7EB;
+    }
+    
+    // Send the response
+    transmit_can_frame(&MG_ZS_UDS_RESPONSE, can_config.battery);
   }
 }
 
@@ -184,6 +550,11 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
   uint8_t remainingData = 0;
   
   switch (rx_frame.ID) {
+    // Handle UDS diagnostic requests (0x781 is UDS request ID)
+    case 0x781:
+      handle_uds_request(rx_frame);
+      break;
+      
     case 0x0AF:  // Battery state data frame
       // Based on log analysis: bytes 2, 5, 6, 7 contain important data
       
@@ -412,6 +783,72 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
     } else if (SOC_Display > SOC_BMS) {
       SOC_Display -= 1 + (SOC_Display - SOC_BMS) / 100; // Faster catch-up for larger differences
     }
+  }
+}
+
+void update_values_battery() {
+  if (datalayer.system.settings.equipment_stop_active == true) {
+    // If emergency stop is active, don't wake up the battery
+    return;
+  }
+
+  // Map all values from MG ZS EV battery to the datalayer structure
+  datalayer.battery.status.real_soc = SOC_BMS;  // Use internal BMS SOC
+  datalayer.battery.status.voltage_dV = batteryVoltage;  // Total pack voltage in decivolts
+  datalayer.battery.status.current_dA = batteryCurrent * 10;  // Convert from amps to deciamps
+
+  // Map power limits
+  datalayer.battery.status.max_discharge_power_W = allowedDischargePower;
+  datalayer.battery.status.max_charge_power_W = allowedChargePower;
+
+  // Map temperature readings
+  datalayer.battery.status.temperature_min_dC = temperatureMin * 10; // Convert to decicelsius
+  datalayer.battery.status.temperature_max_dC = temperatureMax * 10; // Convert to decicelsius
+
+  // Calculate cell statistics for BMS safety checks
+  if (num_cells > 0) {
+    uint16_t min_cell_v = 9999;
+    uint16_t max_cell_v = 0;
+    for (uint8_t i = 0; i < num_cells; i++) {
+      if (cellVoltages[i] < min_cell_v && cellVoltages[i] > 0) {
+        min_cell_v = cellVoltages[i];
+      }
+      if (cellVoltages[i] > max_cell_v) {
+        max_cell_v = cellVoltages[i];
+      }
+    }
+    
+    datalayer.battery.status.cell_min_voltage_mV = min_cell_v;
+    datalayer.battery.status.cell_max_voltage_mV = max_cell_v;
+    
+    // Check if voltage spread is within safe limits
+    uint16_t voltage_spread = max_cell_v - min_cell_v;
+    if (voltage_spread > MAX_CELL_DEVIATION_MV) {
+      set_event(EVENT_CELL_DEVIATION_HIGH, voltage_spread);
+    } else {
+      clear_event(EVENT_CELL_DEVIATION_HIGH);
+    }
+  }
+
+  // Battery design parameters
+  datalayer.battery.info.number_of_cells = num_cells;
+  datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
+  datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_DV;
+  datalayer.battery.info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
+  datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
+  datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
+
+  // Safety checks
+  if (!isolation_status) {
+    set_event(EVENT_BATTERY_ISOLATION, 0);
+  } else {
+    clear_event(EVENT_BATTERY_ISOLATION);
+  }
+
+  // Allow contactor closing if the battery is detected on CAN
+  if (SOC_BMS > 0) {
+    datalayer.system.status.battery_allows_contactor_closing = true;
+    datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
   }
 }
 
