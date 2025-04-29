@@ -724,8 +724,8 @@ void handle_incoming_can_frame_battery(CAN_frame rx_frame) {
     // Calculate energy change (in Wh) based on current
     float energyChange = (batteryCurrent / 10.0) * (batteryVoltage / 10.0) * hoursFraction;
     
-    // For a 64kWh battery, 1Wh = ~0.0015625% SOC change
-    float socChangePercent = energyChange * 100.0 / 64000.0;
+    // For a 44.5kWh battery, 1Wh = ~0.00225% SOC change
+    float socChangePercent = energyChange * 100.0 / 44500.0;
     uint16_t socChange = (uint16_t)(socChangePercent * 100); // Convert to 0.01% units
     
     // Apply change with bounds checking
@@ -1003,7 +1003,7 @@ void setup_battery(void) {  // Performs one time setup at startup
   datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
   datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
   datalayer.battery.info.number_of_cells = num_cells;
-  datalayer.battery.info.total_capacity_Wh = 64000; // 64 kWh battery
+  datalayer.battery.info.total_capacity_Wh = 44500; // 44.5 kWh battery
   
   // Initialize cell voltages to a reasonable default
   for (uint8_t i = 0; i < num_cells; i++) {
