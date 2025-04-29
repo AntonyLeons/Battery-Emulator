@@ -86,6 +86,10 @@ void setup_can_shunt();
 #include "MG-5-BATTERY.h"
 #endif
 
+#ifdef MG_ZS_BATTERY
+#include "MG-ZS-BATTERY.h"
+#endif
+
 #ifdef NISSAN_LEAF_BATTERY
 #include "NISSAN-LEAF-BATTERY.h"
 #endif
