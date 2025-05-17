@@ -117,6 +117,11 @@ void handle_uds_request(CAN_frame rx_frame) {
     uint8_t pid_high = rx_frame.data.u8[2];
     uint8_t pid_low = rx_frame.data.u8[3];
     
+    // Declare all variables used in the switch statement here
+    uint16_t voltage;
+    int16_t current;
+    uint16_t soc;
+    
     // Clear the response frame first
     memset(MG_ZS_UDS_RESPONSE.data.u8, 0, 8);
     
@@ -141,20 +146,19 @@ void handle_uds_request(CAN_frame rx_frame) {
         case 0x42:  // Battery Voltage
           MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
           // Convert batteryVoltage (in decivolts) to the format expected by UDS
-          uint16_t voltage = batteryVoltage;  // in decivolts (385.0V = 3850)
+          voltage = batteryVoltage;  // in decivolts (385.0V = 3850)
           MG_ZS_UDS_RESPONSE.data.u8[4] = (voltage >> 8) & 0xFF;  // High byte
           MG_ZS_UDS_RESPONSE.data.u8[5] = voltage & 0xFF;        // Low byte
           // Fill remaining bytes with 0xAA (unused)
           MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
           MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
-          break;
-          
+          break;          
         case 0x43:  // Battery Current
           MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
           // Convert batteryCurrent (in deciamps) to the format expected by UDS
           // Example in the table shows 9C 53 which would be a specific current value
           // We'll use the current value from our model
-          int16_t current = batteryCurrent * 10;  // Convert to deciamps (for consistency)
+          current = batteryCurrent * 10;  // Convert to deciamps (for consistency)
           MG_ZS_UDS_RESPONSE.data.u8[4] = (current >> 8) & 0xFF;  // High byte
           MG_ZS_UDS_RESPONSE.data.u8[5] = current & 0xFF;        // Low byte
           // Fill remaining bytes with 0xAA (unused)
@@ -171,12 +175,11 @@ void handle_uds_request(CAN_frame rx_frame) {
           MG_ZS_UDS_RESPONSE.data.u8[6] = 0xAA;
           MG_ZS_UDS_RESPONSE.data.u8[7] = 0xAA;
           break;
-          
-        case 0x46:  // Battery SoC
+            case 0x46:  // Battery SoC
           MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
           // Convert SOC_BMS (0.01%) to the format expected by UDS
           // Example in table shows 02 85 which is probably a percentage value
-          uint16_t soc = SOC_BMS / 25;  // Convert from 0.01% to the UDS format
+          soc = SOC_BMS / 25;  // Convert from 0.01% to the UDS format
           MG_ZS_UDS_RESPONSE.data.u8[4] = (soc >> 8) & 0xFF;  // High byte
           MG_ZS_UDS_RESPONSE.data.u8[5] = soc & 0xFF;        // Low byte
           // Fill remaining bytes with 0xAA (unused)
@@ -385,13 +388,14 @@ void handle_uds_request(CAN_frame rx_frame) {
               MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
               MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
               break;
-              
-            case 0x05:  // Battery Voltage (via VCU)
+                case 0x05:  // Battery Voltage (via VCU)
               MG_ZS_UDS_RESPONSE.data.u8[0] = 0x05;
               // Different format than the BMS reports
-              uint16_t vcuVoltage = batteryVoltage / 10;  // Adjust to match example format
-              MG_ZS_UDS_RESPONSE.data.u8[4] = (vcuVoltage >> 8) & 0xFF;
-              MG_ZS_UDS_RESPONSE.data.u8[5] = vcuVoltage & 0xFF;
+              {
+                uint16_t vcuVoltage = batteryVoltage / 10;  // Adjust to match example format
+                MG_ZS_UDS_RESPONSE.data.u8[4] = (vcuVoltage >> 8) & 0xFF;
+                MG_ZS_UDS_RESPONSE.data.u8[5] = vcuVoltage & 0xFF;
+              }
               MG_ZS_UDS_RESPONSE.data.u8[6] = 0x00;
               MG_ZS_UDS_RESPONSE.data.u8[7] = 0x00;
               break;
